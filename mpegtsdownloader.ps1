@@ -21,12 +21,12 @@ function UrlLoader ([string] $url, [regex] $regex) {
 	write-host -NoNewline ("Loading " + $url + " . . . ")
 	$contents = (Invoke-WebRequest -uri ($url)).tostring()
 	write-host ("Finished`r`n")
-	
+
 	# parse file with regex into list
 	write-host -NoNewline ("Parsing . . . ")
 	$list = $contents | Select-String $regex -AllMatches | % { $_.Matches.Value } | select -uniq
 	write-host ("Finished`r`n")
-	
+
 	if($list.count -ne 1) {
 		write-host ("Found " + $list.count + " items.`r`n")
 	}
@@ -110,12 +110,13 @@ function CombineFiles([string[]] $list, [string] $client_dir, [string] $filename
 	write-host ("Finished`r`n")
 }
 
-$regex_url_m3u8 = [regex] '([\w\d-_.:\/\\]+\/)([\w\d-_.\\]+)\.m3u8'
+$regex_url_m3u8 = [regex] '.*\.m3u8'
+$regex_page_m3u8 = [regex] '([\w\d-_.:\/\\]+\/)([\w\d-_.\\]+)\.m3u8'
 $regex_file_m3u8 = [regex] '([\w\d-_.\\]+)\.m3u8'
 $regex_file_ts = [regex] '([\w\d-_.\\]+)\.ts'
 $regex_server_dir = [regex] '([\w\d-_.:\/\\]+\/)'
 
-$page_url = [System.Uri] $args[0]
+$url = [System.Uri] $args[0]
 $page = [string]
 $filename = $args[1]
 $server_dir = [string]
@@ -124,20 +125,31 @@ $m3u8_list = [string] @()
 $ts_list = @()
 
 # make new folder
-if(-not (Test-Path $page_url.Host)) {
-	write-host ("Creating directory " + $page_url.Host + ".`r`n")
+if(-not (Test-Path $url.Host)) {
+	write-host ("Creating directory " + $url.Host + ".`r`n")
 	# store folder path
-	$client_dir = (New-Item $page_url.Host -type directory).tostring() + "\"
+	$client_dir = (New-Item $url.Host -type directory).tostring() + "\"
 }
 else {
-	write-host ("Directory " + $page_url.Host + " found.`r`n")
-	$client_dir = (Get-Item $page_url.Host).tostring() + "\"
+	write-host ("Directory " + $url.Host + " found.`r`n")
+	$client_dir = (Get-Item $url.Host).tostring() + "\"
 }
 
-# load page
+# check the url for .m3u8
+if($regex_url_m3u8.ismatch($url.tostring())) {
+	$m3u8_list = $url.tostring()
+}
+# load .m3u8
 # parse all unique .m3u8 urls from page
 # if more than one, prompt which m3u8 file to load
-$m3u8_list = UrlLoader $page_url $regex_url_m3u8
+else {
+	$m3u8_list = UrlLoader $url $regex_page_m3u8
+}
+
+if($m3u8_list.count -eq 0) {
+	write-host ("Nothing Found.")
+	return;
+}
 
 # set parent directory and filename
 $server_dir = $regex_server_dir.match($m3u8_list).value
