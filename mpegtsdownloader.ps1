@@ -124,6 +124,16 @@ $client_dir = [string]
 $m3u8_list = [string] @()
 $ts_list = @()
 
+if ($args[0] -eq $null) {
+	Write-Host ("No url supplied.")
+	break
+}
+
+if ($args[1] -eq $null) {
+	Write-Host ("No filename supplied.")
+	break
+}
+
 # make new folder
 if(-not (Test-Path $url.Host)) {
 	write-host ("Creating directory " + $url.Host + ".`r`n")
