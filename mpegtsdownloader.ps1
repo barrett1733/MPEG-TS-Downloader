@@ -1,79 +1,49 @@
 
-function DownloadFiles([string[]] $list, [string] $server_dir, [string] $client_dir) {
+function GetFilename ([System.Uri] $url) {
+	$match = ([regex] '(.*(?:\\|\/)+)?((.*)(\.([^?\s]*)))\??(.*)?').match($url)
+	return $match.groups[2].value
+}
+
+function DownloadFiles ([System.Uri[]] $url_list, [string] $client_dir) {
 	# tests for file, if doesn't exist, downloads it
 	write-host ("Downloading files . . .")
 	$counter = 0
-	foreach ($item in $list) {
+	foreach ($item in $url_list) {
 		$counter++
-		if(Test-Path ($client_dir + $item)) {
-			"(" + $counter + "/" + $list.count + ") Downloaded: " + $item
+		$filename = GetFilename($item)
+		if(Test-Path ($client_dir + $filename)) {
+			"(" + $counter + "/" + $url_list.count + ") Downloaded: " + $filename
 			}
 		else {
-			"(" + $counter + "/" + $list.count + ") Downloading: " + $item
-			Invoke-WebRequest ($server_dir + $item) -OutFile ($client_dir + $item)
+			"(" + $counter + "/" + $url_list.count + ") Downloading: " + $filename
+			Invoke-WebRequest -uri ($item) -OutFile ($client_dir + $filename)
 		}
 	}
 	write-host ("Finished`r`n")
 }
 
-function UrlLoader ([string] $url, [regex] $regex) {
+function FileDownloader ([System.Uri] $url) {
 	# download file
 	write-host -NoNewline ("Loading " + $url + " . . . ")
 	$contents = (Invoke-WebRequest -uri ($url)).tostring()
 	write-host ("Finished`r`n")
-
-	# parse file with regex into list
-	write-host -NoNewline ("Parsing . . . ")
-	$list = $contents | Select-String $regex -AllMatches | % { $_.Matches.Value } | select -uniq
-	write-host ("Finished`r`n")
-
-	if($list.count -ne 1) {
-		write-host ("Found " + $list.count + " items.`r`n")
-	}
-	else {
-		write-host ("Found " + $list.count + " item.`r`n")
-	}
-	
-	if($list.count -gt 1) {
-		# pick which file to load
-		return PromptListLoad $list
-	}
-	
-	return $list
-}
-
-function RecursiveFileLoader ([string] $server_dir, [string] $filename, [regex] $regex) {
-	# download file
-	write-host -NoNewline ("Loading " + $server_dir + $filename + " . . . ")
-	$contents = (Invoke-WebRequest -uri ($server_dir + $filename)).tostring()
-	write-host ("Finished`r`n")
-
-	# parse file with regex into list
-	write-host -NoNewline ("Parsing . . . ")
-	$list = $contents | Select-String $regex -AllMatches | % { $_.Matches.Value } | select -uniq
-	write-host ("Finished`r`n")
-
-	if($list.count -ne 1) {
-		write-host ("Found " + $list.count + " items.`r`n")
-	}
-	else {
-		write-host ("Found " + $list.count + " item.`r`n")
-	}
-	
-	if($list.count -gt 1) {
-		# pick which file to load
-		$filetoload = PromptListLoad $list
-		return RecursiveFileLoader $server_dir $filetoload $regex # Warning: infinite recursion possible
-	}
 	return $contents
 }
 
-function PromptListLoad ([string[]] $list) {
+function FileParser ([string] $file, [regex] $regex){
+	# parse file with regex into list
+	write-host -NoNewline ("Parsing . . . ")
+	$list = $file | Select-String $regex -AllMatches | % { $_.Matches.Value } | select -uniq
+	write-host ("Finished`r`n")
+	return $list
+}
+
+function PromptUrlToLoad ([System.Uri[]] $list) {
 	$string = "Pick a file to load.`r`n"
 	$count = 0
 	foreach ($item in $list) {
 		$count++
-		$string += ([string] $count + ": " + $item + "`r`n")
+		$string += ([string] $count + ": " + $item.tostring() + "`r`n")
 	}
 	do {
 		$answ = Read-Host -Prompt $string
@@ -81,6 +51,21 @@ function PromptListLoad ([string[]] $list) {
 	until ([int]$answ -ge 1 -and [int]$answ -le $list.count)
 
 	return $list[[int] $answ - 1]
+}
+
+function CombineUrlFilename ([System.Uri] $url, [string] $file) {
+	# is file a file or directory + file
+	if (([regex] '\/.*|\\.*').ismatch($file)) {
+		# directory + file
+		$server_url = $url.scheme + '://' + $url.host
+		return [System.Uri] ($server_url + $file)
+	}
+	else {
+		# file
+		# get host + directory - file
+		$path = ([regex] '.*\/|.*\\').match($url.absoluteUri).tostring()
+		return [System.Uri] ($path + $file)
+	}
 }
 
 function CombineFiles([string[]] $list, [string] $client_dir, [string] $filename) {
@@ -96,93 +81,94 @@ function CombineFiles([string[]] $list, [string] $client_dir, [string] $filename
 	}
 	
 	# creates new file
-	$combinedfile = New-Item $filename -type file -force
+	$combiningfile = New-Item $filename -type file -force
 			
 	# combines files into specified file
 	$count = 0
 	foreach ($item in $list) {
-		$loadedfile = Get-Content ($client_dir + $item) -Encoding Byte -ReadCount 0
+		$item_filename = GetFilename($item)
+		$loadedfile = Get-Content ($client_dir + $item_filename) -Encoding Byte -ReadCount 0
 
-		Add-Content -Path $combinedfile -Value $loadedfile -Encoding Byte
+		Add-Content -Path $combiningfile -Value $loadedfile -Encoding Byte
 		$count++
-		"(" + $count + "/" + $list.count + ") Finished: " + $item
+		"(" + $count + "/" + $list.count + ") Finished: " + $item_filename
 	}
 	write-host ("Finished`r`n")
 }
 
-$regex_url_m3u8 = [regex] '.*\.m3u8'
-$regex_page_m3u8 = [regex] '([\w\d-_.:\/\\]+\/)([\w\d-_.\\]+)\.m3u8'
-$regex_file_m3u8 = [regex] '([\w\d-_.\\]+)\.m3u8'
-$regex_file_ts = [regex] '([\w\d-_.\\]+)\.ts'
-$regex_server_dir = [regex] '([\w\d-_.:\/\\]+\/)'
+$regex_url_m3u8 = [regex] 'http+s*\:.*\/.*\.m3u8'
+$regex_file_m3u8 = [regex] '.*\.m3u8'
+$regex_file_ts = [regex] '.*\.ts'
 
-$url = [System.Uri] $args[0]
-$page = [string]
-$filename = $args[1]
-$server_dir = [string]
-$client_dir = [string]
-$m3u8_list = [string] @()
-$ts_list = @()
+$in_url = [System.Uri] $args[0]
+$filename_ts = $args[1]
+$current_url = [System.Uri]
+$client_dir = [System.IO.FileInfo]
 
-if ($args[0] -eq $null) {
-	Write-Host ("No url supplied.")
-	break
-}
+$in_url = [System.Uri] (Read-Host "Enter URL")
+$filename_ts = Read-Host "Enter output filename"
 
-if ($args[1] -eq $null) {
-	Write-Host ("No filename supplied.")
-	break
-}
-
-# make new folder
-if(-not (Test-Path $url.Host)) {
-	write-host ("Creating directory " + $url.Host + ".`r`n")
-	# store folder path
-	$client_dir = (New-Item $url.Host -type directory).tostring() + "\"
+# check if url is valid
+if($regex_url_m3u8.ismatch($in_url.absoluteUri)) {
+	$current_url = $in_url
 }
 else {
-	write-host ("Directory " + $url.Host + " found.`r`n")
-	$client_dir = (Get-Item $url.Host).tostring() + "\"
-}
-
-# check the url for .m3u8
-if($regex_url_m3u8.ismatch($url.tostring())) {
-	$m3u8_list = $url.tostring()
-}
-# load .m3u8
-# parse all unique .m3u8 urls from page
-# if more than one, prompt which m3u8 file to load
-else {
-	$m3u8_list = UrlLoader $url $regex_page_m3u8
-}
-
-if($m3u8_list.count -eq 0) {
-	write-host ("Nothing Found.")
+	write-host ("Url not valid.")
 	return;
 }
 
-# set parent directory and filename
-$server_dir = $regex_server_dir.match($m3u8_list).value
-$m3u8_filename = $regex_file_m3u8.match($m3u8_list).value
-
-# load file, search for more .m3u8 in file, if none return file
-# all in same server directory
-$m3u8 = RecursiveFileLoader $server_dir $m3u8_filename $regex_file_m3u8
-
-# parse .m3u8 for .ts files
-write-host -NoNewline ("Parsing . . . ")
-$ts_list = $m3u8 | Select-String $regex_file_ts -AllMatches | % { $_.Matches.Value } | select -uniq
-write-host -NoNewline ("Finished`r`n")
-
-# downloads list of files from server directory to client directory
-DownloadFiles $ts_list $server_dir $client_dir
-
-# combines list of files into one file
-CombineFiles $ts_list $client_dir $filename
-
-# delete downloaded files
-$answ = Read-Host -Prompt ("Cleanup? (Y/N)")
-if($answ -eq "Y" -or $answ -eq "y") {
-	Remove-Item -Recurse -Force $client_dir
+if(-not (Test-Path $in_url.Host)) {
+	write-host ("Creating directory " + $in_url.Host + ".`r`n")
+	# make new folder, store folder path
+	$client_dir = (New-Item $in_url.Host -type directory).tostring() + "\"
+}
+else {
+	write-host ("Directory " + $in_url.Host + " found.`r`n")
+	# found folder, store folder path
+	$client_dir = (Get-Item $in_url.Host).tostring() + "\"
 }
 
+while ($current_url.tostring() -ne '') {
+	$current_file = FileDownloader $current_url
+
+	# parse file with regex into list
+	$file_m3u8_list = FileParser $current_file $regex_file_m3u8
+	
+	if($file_m3u8_list.count -ne 1) {
+		write-host ("Found " + $file_m3u8_list.count + " items.`r`n")
+	}
+	else {
+		write-host ("Found " + $file_m3u8_list.count + " item.`r`n")
+	}
+	
+	if($file_m3u8_list.count -gt 1) {
+		# pick which file to load
+		$file_choice = PromptUrlToLoad $file_m3u8_list
+		write-host $current_url.gettype()
+		$current_url = CombineUrlFilename $current_url $file_choice
+	}
+	else {
+		# load .ts files
+		$file_ts_list = FileParser $current_file $regex_file_ts
+		
+		# makes new list of .ts urls
+		$url_ts_list = @()
+		foreach ($filename in $file_ts_list) {
+			$url_ts_list += CombineUrlFilename $current_url $filename
+		}
+
+		# downloads list of files from server directory to client directory
+		DownloadFiles $url_ts_list $client_dir
+		
+		# combines list of files into one file
+		CombineFiles $file_ts_list $client_dir $filename_ts
+		
+		# delete downloaded files
+		$answ = Read-Host -Prompt ("Cleanup? (Y/N)")
+		if($answ -eq "Y" -or $answ -eq "y") {
+			Remove-Item -Recurse -Force $client_dir
+		}
+		# clear current url to end loop
+		$current_url = [System.Uri] ''
+	}
+}
