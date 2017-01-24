@@ -129,6 +129,7 @@ else {
 }
 
 while ($current_url.tostring() -ne '') {
+	write-host $current_url
 	$current_file = FileDownloader $current_url
 
 	# parse file with regex into list
@@ -141,11 +142,13 @@ while ($current_url.tostring() -ne '') {
 		write-host ("Found " + $file_m3u8_list.count + " item.`r`n")
 	}
 	
-	if($file_m3u8_list.count -gt 1) {
+	if ($file_m3u8_list.count -gt 1) {
 		# pick which file to load
 		$file_choice = PromptUrlToLoad $file_m3u8_list
-		write-host $current_url.gettype()
 		$current_url = CombineUrlFilename $current_url $file_choice
+	}
+	elseif ($file_m3u8_list.count -eq 1) {
+		$current_url = CombineUrlFilename $current_url $file_m3u8_list
 	}
 	else {
 		# load .ts files
